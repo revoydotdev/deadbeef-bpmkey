@@ -67,6 +67,10 @@ These are inherent limits of aubio's beat tracker and libKeyFinder's key model, 
 
 Treat detected tags as a useful first pass for sorting/DJ workflows, not as authoritative ground truth.
 
+### Optional: better BPM via ML
+
+If aubio's accuracy isn't good enough on parts of your library, [`tools/bpmkey-ml-rescan.py`](tools/) is a standalone batch tagger using `madmom` or `beat-this`. It writes the `BPM` tag directly to your files; the plugin's `skip_existing=1` leaves them alone afterward. **Opt-in** — not loaded by DeaDBeeF and not a dependency of the AUR package. See [tools/README.md](tools/README.md).
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
