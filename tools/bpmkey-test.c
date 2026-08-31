@@ -55,11 +55,39 @@ static void feed(analyzer_t *a, const float *m, size_t n) {
     }
 }
 
+/* Quote one argv element for the POSIX shell used by popen(3).  The harness
+ * accepts arbitrary local filenames, so interpolating a path in double quotes
+ * would still permit command substitution and variable expansion. */
+static int shell_quote(char *out, size_t outlen, const char *value) {
+    size_t used = 0;
+    if (outlen < 3) return -1;
+    out[used++] = '\'';
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        if (*p == '\'') {
+            if (used + 4 >= outlen) return -1;
+            memcpy(out + used, "'\\''", 4);
+            used += 4;
+        } else {
+            if (used + 1 >= outlen) return -1;
+            out[used++] = (char)*p;
+        }
+    }
+    if (used + 2 > outlen) return -1;
+    out[used++] = '\'';
+    out[used] = '\0';
+    return 0;
+}
+
 static int analyze_file(const char *path) {
     char cmd[8192];
-    snprintf(cmd, sizeof(cmd),
-        "ffmpeg -nostdin -v error -i \"%s\" -f f32le -ac 1 -ar %d - 2>/dev/null",
-        path, SR);
+    char quoted_path[8192];
+    if (shell_quote(quoted_path, sizeof(quoted_path), path) < 0 ||
+        snprintf(cmd, sizeof(cmd),
+            "ffmpeg -nostdin -v error -i %s -f f32le -ac 1 -ar %d - 2>/dev/null",
+            quoted_path, SR) >= (int)sizeof(cmd)) {
+        fprintf(stderr, "path is too long: %s\n", path);
+        return -1;
+    }
     FILE *fp = popen(cmd, "r");
     if (!fp) { fprintf(stderr, "popen failed: %s\n", path); return -1; }
 
