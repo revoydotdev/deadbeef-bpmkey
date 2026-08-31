@@ -1,76 +1,161 @@
-# deadbeef-bpmkey
+<div align="center">
 
-Background BPM and musical-key detection plugin for [DeaDBeeF](https://deadbeef.sourceforge.io/). Analyzes every track in your playlists, writes `bpm` and `key` tags to the database (and optionally to file tags), and emits track-info-changed events so columns refresh live.
+# bpmkey
 
-- BPM via [aubio](https://aubio.org/)
-- Key via [libKeyFinder](https://github.com/mixxxdj/libKeyFinder)
-- Multi-threaded worker pool, deduplicated URI queue, incremental scan, persistent tag write-back
+### BPM and musical-key analysis for DeaDBeeF
 
-## Build
+[DeaDBeeF](https://deadbeef.sourceforge.io/) plugin · [aubio](https://aubio.org/) tempo analysis · [libKeyFinder](https://github.com/mixxxdj/libKeyFinder) key analysis · [GPL-3.0-or-later](LICENSE)
 
-Dependencies (Arch package names in parentheses):
+</div>
 
-- DeaDBeeF headers (`deadbeef`)
-- aubio (`aubio`) — pkg-config name `aubio`
-- libKeyFinder (`libkeyfinder`) — pkg-config name `libkeyfinder`
-- A C and C++ compiler, GNU make, pkg-config
+`bpmkey` is a small native plugin that analyzes the tracks in your DeaDBeeF
+playlists in the background and adds `bpm` and `key` metadata. It is meant to
+make a music library easier to sort, browse, and prepare—not to replace a
+careful musical judgment.
+
+| It provides | How it works |
+| --- | --- |
+| Background analysis | A configurable worker pool queues distinct track URIs across the current playlists. |
+| BPM metadata | [aubio](https://aubio.org/)'s tempo tracker produces a one-decimal BPM value when it has a valid result. |
+| Key metadata | [libKeyFinder](https://github.com/mixxxdj/libKeyFinder) estimates a major or minor key from decoded audio. |
+| Live library updates | The plugin updates DeaDBeeF track metadata, notifies the player so columns refresh, and can ask the track decoder to write the new metadata back to the file. |
+
+## Install
+
+### Requirements
+
+You need a DeaDBeeF installation with development headers, plus:
+
+- `aubio` (pkg-config package: `aubio`)
+- `libKeyFinder` (pkg-config package: `libkeyfinder`)
+- a C compiler, a C++ compiler, GNU Make, and `pkg-config`
+
+On Arch-based systems, the relevant package names are typically `deadbeef`,
+`aubio`, and `libkeyfinder`. Other distributions may split DeaDBeeF's runtime
+and development headers into separate packages.
+
+Check that the analysis libraries are visible to the build, then compile:
 
 ```sh
+pkg-config --modversion aubio libkeyfinder
 make
-make install PREFIX=$HOME/.local      # user install -> ~/.local/lib/deadbeef/
-# or
-sudo make install                      # system install -> /usr/local/lib/deadbeef/
 ```
 
-## Usage
-
-Restart DeaDBeeF. The plugin starts a worker pool and queues every track that's missing `bpm` or `key` tags.
-
-In **View → Design Mode → right-click column header → Add column**, set:
-
-- Title: `BPM`, format: `%bpm%`
-- Title: `Key`, format: `%key%`
-
-### CLI
+Install for the current user or system-wide:
 
 ```sh
-deadbeef --plugin=bpmkey status    # progress + queue
-deadbeef --plugin=bpmkey scan      # incremental (only missing tags)
-deadbeef --plugin=bpmkey rescan    # force re-analyze everything
-deadbeef --plugin=bpmkey scandir /path/to/dir   # ad-hoc folder
+# User installation: ~/.local/lib/deadbeef/bpmkey.so
+make install PREFIX="$HOME/.local"
+
+# System installation: /usr/local/lib/deadbeef/bpmkey.so
+sudo make install
 ```
 
-### Configuration
+To remove the same installation later, repeat the prefix you used:
 
-In Edit → Preferences → Plugins → BPM and Key Detector, or in `deadbeef.conf`:
+```sh
+make uninstall PREFIX="$HOME/.local"
+```
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `bpmkey.threads` | `1` | Worker threads (cap 32). One is usually enough; FFTW key analysis is serialized internally. |
-| `bpmkey.write_tags` | `1` | Persist `bpm`/`key` to file tags via the decoder's `write_metadata`. |
-| `bpmkey.skip_existing` | `1` | Skip tracks that already have both tags. |
-| `bpmkey.scan_on_start` | `1` | Enqueue all missing tracks on plugin load. |
-| `bpmkey.reactive` | `1` | Re-scan when playlists change. |
+Restart DeaDBeeF after installing the shared object. The plugin identifies
+itself as **BPM and Key Detector** in the Plugins preferences.
 
-## Output format
+## First scan
 
-- **BPM**: numeric, one decimal place (e.g. `123.5`).
-- **Key**: a short tag using sharps for some, flats for others (KeyFinder's convention): `C`, `Cm`, `Db`, `Dbm`, `D`, `Dm`, `Eb`, `Ebm`, `E`, `Em`, `F`, `Fm`, `Gb`, `Gbm`, `G`, `Gm`, `Ab`, `Abm`, `A`, `Am`, `Bb`, `Bbm`, `B`, `Bm`. Major = bare letter; minor = letter + `m`. `F#` is reported as `Gb`, `C#` as `Db`, etc.
+With the defaults, bpmkey starts its workers when DeaDBeeF loads plugins and
+queues tracks that are missing either `bpm` or `key`. It scans the main track
+list of every playlist, while avoiding duplicate URIs during that pass.
 
-## Accuracy expectations
+Add visible columns in **View → Design Mode**: right-click a column header,
+choose **Add column**, then use these title-format strings:
 
-These are inherent limits of aubio's beat tracker and libKeyFinder's key model, not bugs in the plugin. See [TEST_REPORT.md](TEST_REPORT.md) for the methodology and results.
+| Column | Format |
+| --- | --- |
+| BPM | `%bpm%` |
+| Key | `%key%` |
 
-**BPM**: On a 20-track sample of pop/rock/electronic with well-documented canonical BPMs, **60% landed within ±3 BPM** and **75% within ±10 BPM**. Failures concentrate on ballads, syncopated grooves, and reggae backbeats where aubio locks to a sub-pattern.
+The command-line interface can inspect or start a scan from a DeaDBeeF
+process:
 
-**Key**: On a 15-track sample of solo classical (piano + cello — the hardest case), **40% matched the tonic exactly** but **all 15 fell on a Camelot-adjacent key** (relative major/minor, dominant, or enharmonic). libKeyFinder is trained for harmonic pop/EDM and is more accurate on material with drums and bass.
+```sh
+deadbeef --plugin=bpmkey status              # queue, completed count, and workers
+deadbeef --plugin=bpmkey scan                # analyze tracks missing a tag
+deadbeef --plugin=bpmkey rescan              # force analysis of all playlist tracks
+deadbeef --plugin=bpmkey scandir /path/to/dir # add a "bpmkey-scan" playlist and force a scan
+```
 
-Treat detected tags as a useful first pass for sorting/DJ workflows, not as authoritative ground truth.
+`scandir` changes the playlist collection by creating a playlist named
+`bpmkey-scan` and importing the supplied directory. Use `status` when you only
+want to inspect progress.
 
-### Optional: better BPM via ML
+## Configuration
 
-If aubio's accuracy isn't good enough on parts of your library, [`tools/bpmkey-ml-rescan.py`](tools/) is a standalone batch tagger using `madmom` or `beat-this`. It writes the `BPM` tag directly to your files; the plugin's `skip_existing=1` leaves them alone afterward. **Opt-in** — not loaded by DeaDBeeF and not a dependency of the AUR package. See [tools/README.md](tools/README.md).
+Configure the plugin in **Edit → Preferences → Plugins → BPM and Key
+Detector**, or set the following keys in `deadbeef.conf`.
+
+| Key | Default | Effect |
+| --- | ---: | --- |
+| `bpmkey.threads` | `1` | Number of workers, clamped to 1–32. Audio decoding and BPM analysis can run concurrently; key analysis is serialized because of libKeyFinder/FFTW plan creation. |
+| `bpmkey.write_tags` | `1` | Ask the decoder to persist successfully detected `bpm` and/or `key` metadata to the source file. Set to `0` for DeaDBeeF metadata only. |
+| `bpmkey.skip_existing` | `1` | Skip a track during ordinary scans when it already has both tags. |
+| `bpmkey.scan_on_start` | `1` | Queue an ordinary scan after DeaDBeeF has loaded plugins. |
+| `bpmkey.reactive` | `1` | Queue an ordinary scan when a playlist changes. |
+
+## Tag format and limits
+
+- **BPM** is stored with one decimal place, for example `123.5`.
+- **Key** uses the spellings returned by the plugin's libKeyFinder mapping:
+  `C`, `Cm`, `Db`, `Dbm`, `D`, `Dm`, `Eb`, `Ebm`, `E`, `Em`, `F`, `Fm`, `Gb`,
+  `Gbm`, `G`, `Gm`, `Ab`, `Abm`, `A`, `Am`, `Bb`, `Bbm`, `B`, and `Bm`.
+  A bare note is major; `m` is minor. Enharmonic spellings such as `F#` and
+  `C#` are represented as `Gb` and `Db`.
+- Tracks shorter than roughly one second, tracks unsupported by an available
+  DeaDBeeF decoder, or tracks for which an analyzer cannot produce a valid
+  value can remain partially or wholly untagged.
+- File write-back depends on the selected DeaDBeeF decoder supporting
+  `write_metadata`; retain backups if you do not want audio-file tags changed.
+
+Tempo and key estimation are fallible, especially for material with unstable
+tempo, sparse percussion, or ambiguous harmony. Treat the results as useful
+starting metadata rather than canonical facts. The included
+[test report](TEST_REPORT.md) records the project's limited, reproducible
+sample and its methodology; it is evidence for that sample, not a general
+accuracy guarantee.
+
+## Optional ML BPM companion
+
+[`tools/bpmkey-ml-rescan.py`](tools/bpmkey-ml-rescan.py) is an opt-in batch
+tagger for cases where you want to try a separate ML BPM estimator. It is not
+loaded by DeaDBeeF, is not required to build this plugin, and writes `BPM`
+metadata directly to the files it processes. See [the tools guide](tools/README.md)
+for its dependencies, supported backends, and usage. The plugin's ordinary
+scan skips only tracks that already have **both** `bpm` and `key`; run the
+companion after a key is present if you do not want a later plugin scan to
+replace its BPM value.
+
+## Build and developer checks
+
+```sh
+make                # build bpmkey.so
+make -C tools       # build the standalone analyzer harness
+python3 -m py_compile tools/bpmkey-ml-rescan.py
+python3 tools/bpmkey-ml-rescan.py --help
+```
+
+The standalone harness accepts audio-file paths and prints tab-separated
+measurements:
+
+```sh
+./tools/bpmkey-test /path/to/track.flac
+```
+
+It additionally requires `ffmpeg` to decode its input. See
+[TEST_REPORT.md](TEST_REPORT.md) for the exact analysis parameters and sample
+results.
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+This project is licensed under the [GNU General Public License, version 3 or
+later](LICENSE). DeaDBeeF, aubio, libKeyFinder, and their respective names are
+their upstream projects' property; this repository is an independent plugin
+that uses their published interfaces and libraries.
